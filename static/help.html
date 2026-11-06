@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>使用帮助 · 小说工作台</title>
+<style>
+  :root {
+    --bg: #f1eee7;
+    --surface: #fffdf8;
+    --surface-2: #f7f4ed;
+    --border: #e4dfd3;
+    --border-strong: #d5cebf;
+    --text: #252a2e;
+    --muted: #70777b;
+    --accent: #2f6b5f;
+    --accent-ink: #1f4d44;
+    --accent-soft: #e7f0ec;
+    --shadow-sm: 0 1px 2px rgba(37, 42, 46, .05);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    color: var(--text);
+    background: var(--bg);
+    font-family: "Inter", "Noto Sans CJK SC", "Source Han Sans SC", system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    line-height: 1.75;
+  }
+  ::selection { background: #cfe3dc; }
+  a { color: var(--accent-ink); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  .topbar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-height: 58px;
+    padding: 10px 22px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(255, 253, 248, .94);
+    backdrop-filter: blur(10px);
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    color: var(--text);
+    font-family: "Noto Serif CJK SC", "Songti SC", serif;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: .09em;
+  }
+  .brand::before {
+    content: "";
+    width: 9px;
+    height: 9px;
+    border-radius: 3px;
+    background: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .topbar-sep { color: var(--border-strong); }
+  .topbar-title { color: var(--muted); font-size: 12.5px; }
+  .back {
+    margin-left: auto;
+    padding: 5px 11px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 12.5px;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .back:hover { border-color: var(--border-strong); background: var(--surface-2); }
+  .shell {
+    display: grid;
+    grid-template-columns: 214px minmax(0, 1fr);
+    gap: 46px;
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 34px 24px 90px;
+  }
+  .toc {
+    position: sticky;
+    top: 88px;
+    align-self: start;
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
+  }
+  .toc-title {
+    margin: 0 0 8px;
+    color: var(--muted);
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: .14em;
+  }
+  .toc a {
+    display: block;
+    padding: 5px 7px;
+    border-radius: 6px;
+    color: #4a5054;
+    font-size: 12.5px;
+    text-decoration: none;
+  }
+  .toc a:hover { background: var(--surface-2); color: var(--accent-ink); }
+  .article { max-width: 780px; }
+  .eyebrow {
+    margin: 0 0 8px;
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .16em;
+  }
+  h1 {
+    margin: 0 0 16px;
+    color: #202523;
+    font-family: "Noto Serif CJK SC", "Songti SC", serif;
+    font-size: 34px;
+    font-weight: 600;
+    letter-spacing: .03em;
+    line-height: 1.3;
+  }
+  .lead { margin: 0 0 30px; color: #4c5256; font-size: 15px; }
+  section { scroll-margin-top: 86px; padding-top: 8px; }
+  section + section { margin-top: 40px; padding-top: 30px; border-top: 1px solid var(--border); }
+  h2 {
+    margin: 0 0 14px;
+    color: #202523;
+    font-family: "Noto Serif CJK SC", "Songti SC", serif;
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: .02em;
+  }
+  h3 { margin: 22px 0 8px; color: #2d3235; font-size: 15px; font-weight: 600; }
+  p { margin: 10px 0; }
+  ul, ol { margin: 10px 0; padding-left: 22px; }
+  li { margin: 5px 0; }
+  strong { font-weight: 600; }
+  code {
+    padding: 1px 5px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--surface-2);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: .9em;
+  }
+  pre {
+    margin: 14px 0;
+    padding: 14px 16px;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    color: #313635;
+    line-height: 1.8;
+    white-space: pre-wrap;
+  }
+  pre code { padding: 0; border: 0; background: transparent; font-size: 12.5px; }
+  .quick {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 8px;
+    margin: 22px 0 6px;
+  }
+  .quick-item {
+    padding: 12px 11px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+  }
+  .quick-item b { display: block; margin-bottom: 3px; color: var(--accent); font-size: 11px; letter-spacing: .08em; }
+  .quick-item span { color: #3b4043; font-size: 12.5px; line-height: 1.55; }
+  .callout {
+    margin: 16px 0;
+    padding: 11px 14px;
+    border-left: 3px solid #b9cfc7;
+    border-radius: 0 9px 9px 0;
+    background: var(--surface);
+    color: #4c5256;
+    font-size: 13px;
+    line-height: 1.8;
+  }
+  .callout strong { color: var(--accent-ink); }
+  .warn { border-left-color: #d7b07a; }
+  .warn strong { color: #8a5a1f; }
+  table {
+    width: 100%;
+    margin: 14px 0;
+    border-collapse: collapse;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    font-size: 13px;
+  }
+  th, td { padding: 9px 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+  th { background: var(--surface-2); color: var(--muted); font-size: 11.5px; font-weight: 700; letter-spacing: .05em; }
+  tr:last-child td { border-bottom: 0; }
+  .step-list { list-style: none; margin: 16px 0; padding: 0; counter-reset: step; }
+  .step-list > li {
+    position: relative;
+    margin: 0 0 10px;
+    padding: 12px 14px 12px 48px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+  }
+  .step-list > li::before {
+    counter-increment: step;
+    content: counter(step, decimal-leading-zero);
+    position: absolute;
+    top: 13px;
+    left: 13px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 7px;
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+    font-size: 10.5px;
+    font-weight: 700;
+  }
+  .step-list b { color: #2d3235; }
+  details {
+    margin: 10px 0;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+  }
+  summary {
+    padding: 11px 14px;
+    cursor: pointer;
+    color: #3b4043;
+    font-size: 13.5px;
+    font-weight: 600;
+  }
+  details p { margin: 0; padding: 0 14px 13px; color: #4c5256; font-size: 13px; }
+  .footer {
+    margin-top: 44px;
+    padding-top: 18px;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .footer a { color: var(--accent-ink); }
+  @media (max-width: 900px) {
+    .shell { display: block; padding: 24px 18px 70px; }
+    .toc {
+      position: static;
+      margin-bottom: 28px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      padding: 10px;
+    }
+    .toc-title { width: 100%; margin-bottom: 4px; }
+    .toc a { padding: 4px 8px; border: 1px solid var(--border); border-radius: 999px; }
+    .quick { grid-template-columns: 1fr 1fr; }
+    h1 { font-size: 27px; }
+    h2 { font-size: 20px; }
+  }
+  @media (max-width: 520px) {
+    .topbar { padding: 9px 12px; gap: 8px; }
+    .topbar-title { display: none; }
+    .topbar-sep { display: none; }
+    .back { margin-left: auto; }
+    .quick { grid-template-columns: 1fr; }
+    table { display: block; overflow-x: auto; }
+    .step-list > li { padding-left: 44px; }
+  }
+  @media print {
+    .topbar, .toc { display: none; }
+    .shell { display: block; max-width: none; padding: 0; }
+  }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <span class="brand">小说工作台</span>
+  <span class="topbar-sep">/</span>
+  <span class="topbar-title">使用帮助</span>
+  <a class="back" href="/">← 返回工作台</a>
+</header>
+
+<div class="shell">
+  <nav class="toc" aria-label="帮助目录">
+    <p class="toc-title">目录</p>
+    <a href="#quick">快速开始</a>
+    <a href="#before">创建前检查</a>
+    <a href="#fork">选择分叉点</a>
+    <a href="#form">填写表单</a>
+    <a href="#generate">生成首章</a>
+    <a href="#read">阅读与续写</a>
+    <a href="#manage">管理支线</a>
+    <a href="#faq">常见问题</a>
+  </nav>
+
+  <main class="article">
+    <p class="eyebrow">使用帮助</p>
+    <h1>从导入到创建一条 IF 支线</h1>
+    <p class="lead">按本页从上到下操作即可。创建支线不需要先手动理解全书；程序会自动补齐分叉点之前的阅读记忆，所以分叉越靠后，等待越久。</p>
+
+    <section id="quick">
+      <h2>快速开始</h2>
+      <div class="quick" aria-label="五个步骤">
+        <div class="quick-item"><b>01 导入</b><span>选择或导入 TXT / EPUB 小说。</span></div>
+        <div class="quick-item"><b>02 选章</b><span>在左栏点开想改写的章节。</span></div>
+        <div class="quick-item"><b>03 分叉</b><span>点“从本章后分叉”，自动带入章节。</span></div>
+        <div class="quick-item"><b>04 填写</b><span>写名称、设定、风格和每章字数。</span></div>
+        <div class="quick-item"><b>05 生成</b><span>点“创建支线并写首章”，等待完成。</span></div>
+      </div>
+      <div class="callout"><strong>推荐路径：</strong>用“从本章后分叉”按钮，而不是手动在表单里选章节。它会自动选中你当前阅读的章，并打开创建面板，最不容易选错。</div>
+    </section>
+
+    <section id="before">
+      <h2>创建前检查</h2>
+      <p>顶部右上角应显示 <strong>“我的模型就绪”</strong>。如果显示“未配置模型”或“模型未就绪”：</p>
+      <ol>
+        <li>点顶部“我的模型”。</li>
+        <li>选择接口类型，填写 API URL、模型 ID 和<strong>你自己的</strong> API Key。</li>
+        <li>点“保存并测试”，状态变为“我的模型就绪”后才能生成。</li>
+      </ol>
+      <p>模型未就绪、并发已满或已有任务运行时，“创建支线并写首章”会暂时不可用。</p>
+      <div class="callout warn"><strong>提示：</strong>API Key 只保存在你自己的浏览器，提交任务时发送到服务端内存，不写入数据库；公用电脑请用完清除。</div>
+      <div class="callout"><strong>本地模型：</strong>llama.cpp 等本地接口只允许在本机通过 <code>http://127.0.0.1:8080</code> 直接访问时使用；通过公网域名访问时，服务器会拒绝 localhost 和内网地址。</div>
+    </section>
+
+    <section id="fork">
+      <h2>选择分叉点</h2>
+      <p>分叉点决定“从哪里开始不认原作”。</p>
+      <ol class="step-list">
+        <li><b>在左栏选中要改写的章节。</b>例如“第八章 不准革命”。</li>
+        <li><b>点正文底部的“从本章后分叉”。</b>右侧会自动切到“创建 IF”，并选中这一章。</li>
+        <li><b>看表单下方的提示。</b>它应显示所选章节标题与“之后”，例如：<br>“分歧点：第八章 不准革命 之后。该章结束前的事实保留，之后原作全部作废。”</li>
+      </ol>
+      <p>也可以手动在“分叉章节”下拉里选某一章的“之后”，或选“故事开始前（不采用原作剧情）”。</p>
+      <div class="callout warn"><strong>请以章节标题为准。</strong>程序内部的“阅读段号”可能因为前言、目录或超长章节拆段而不同于原书章号；界面提示和支线详情都显示标题，不再依赖数字。</div>
+      <div class="callout warn"><strong>支线创建后不能修改分叉点。</strong>选错了只能新建一条支线，确认满意后再删除旧支线。</div>
+    </section>
+
+    <section id="form">
+      <h2>填写创建表单</h2>
+      <table>
+        <thead><tr><th>字段</th><th>怎么填</th></tr></thead>
+        <tbody>
+          <tr><td><strong>支线名称</strong></td><td>建议带上分叉位置或核心改动，例如“阿Q·玉佩线”“Jekyll·限制资金线”。同名支线可在“全部支线”里按创建时间区分。</td></tr>
+          <tr><td><strong>分叉章节</strong></td><td>优先用“从本章后分叉”自动带入；手动选择时认准章节标题和下方提示。</td></tr>
+          <tr><td><strong>IF 设定 / 转折点</strong></td><td>写清楚改了什么、人物要做什么、想要什么结果、必须保持的限制。必填。</td></tr>
+          <tr><td><strong>写作风格</strong></td><td>可选。例如“保持原作第三人称、冷峻白描，不用现代网络用语”。</td></tr>
+          <tr><td><strong>每章字数</strong></td><td>400—4000，默认 1200。这是创作指引，不是精确字数承诺。</td></tr>
+        </tbody>
+      </table>
+
+      <h3>分章目标怎么写</h3>
+      <p>如果希望第一章、第二章各有明确任务，用“第1章：”“第2章：”分段。程序会按 IF 章号提取当前章目标，不会把第二章任务提前到第一章。</p>
+      <pre><code>第1章：阿Q没有去酒店，而是先找小D商量玉佩怎么处理；两人约定共同保管，并留下凭据。
+第2章：两人去酒店存玉佩，掌柜只肯按手印出收条；阿Q拿到收条后又担心小D独吞。</code></pre>
+      <p>不写“第几章”也可以，整段设定会作为当前路线目标，本章需要体现实际进展。</p>
+      <div class="callout"><strong>一致性原则：</strong>分叉前已成立的事实要一致；分叉后的原作完全忽略，可以创造新人物、动机、事件和结局。不要要求模型参照原作结局，也不要提前完成后面章节的目标。</div>
+    </section>
+
+    <section id="generate">
+      <h2>生成首章</h2>
+      <p>点“创建支线并写首章”后，程序依次执行：</p>
+      <ol class="step-list">
+        <li><b>补齐阅读记忆。</b>如果分叉点之前还没“理解”过，程序会自动阅读并压缩那些章节。</li>
+        <li><b>规划本章行动。</b>根据设定和分叉点规划具体动作、障碍与结果。</li>
+        <li><b>生成正文。</b>顶部输出区实时显示内容，可自动滚动、复制或“放大查看”。</li>
+      </ol>
+      <p>成功时显示“任务完成”，首章保存到新支线。失败时保留“最后完整草稿（未保存）”，可填写具体编辑反馈后点“按反馈修订”。截断、达到 token 上限或 API 错误属于技术失败，不会把半截稿当成正式章节。</p>
+      <div class="callout"><strong>没有自动评分。</strong>程序只做技术检查，不判断文笔好坏；是否读得舒服由你决定。</div>
+    </section>
+
+    <section id="read">
+      <h2>阅读与续写</h2>
+      <p>进入右侧“支线”页，可以看到：</p>
+      <ul>
+        <li><strong>开篇位置</strong>：原书名、分叉章节标题、该章结尾原文尾段；可展开核对。</li>
+        <li><strong>已写章节</strong>：章号、标题、字数；点击切换阅读。</li>
+        <li><strong>阅读支线</strong>：正文区切到“IF 正文”。</li>
+        <li><strong>续写一章</strong>：按上一章和设定继续写下一章。</li>
+        <li><strong>导出 TXT</strong>：导出当前支线全文。</li>
+      </ul>
+      <h3>重新生成末章</h3>
+      <p>“重新生成末章（保留原版）”会新建一条支线，复制原支线除最后一章外的已有章节，再生成替代的最后一章。原支线及其正文保持不变。支线为空时，该按钮用于重试生成首章。</p>
+      <p>如果只是最后一章不满意，也可用“删除末章”移除它后重新续写。</p>
+    </section>
+
+    <section id="manage">
+      <h2>管理支线</h2>
+      <ul>
+        <li><strong>重命名</strong>：只改支线名称，不影响正文。</li>
+        <li><strong>删除末章</strong>：只删除最后一条正文及其过期摘要，其他章节保留，可重新续写。</li>
+        <li><strong>删除支线</strong>：删除该支线正文和支线记忆，原书不受影响；不可恢复，会二次确认。</li>
+        <li><strong>全部支线</strong>：列出每条支线的开篇章节、创建时间、已写章数，便于区分同名或多次重生成的支线。</li>
+      </ul>
+      <p>生成中的支线会拒绝改名、删章或删除，避免和数据写入冲突。</p>
+      <div class="callout warn"><strong>删除不可撤销。</strong>删除支线前先确认名称和开篇位置；需要保留时先“导出 TXT”。</div>
+    </section>
+
+    <section id="faq">
+      <h2>常见问题</h2>
+      <details><summary>为什么创建后等待很久？</summary><p>分叉章节靠后时，程序要先阅读并压缩此前所有章节。已经“理解”过的章节会复用缓存；可以提前点“理解至本章”减少等待。</p></details>
+      <details><summary>可以先只理解、不生成吗？</summary><p>可以。读原文时点“理解至本章”，只建立剧情记忆，不写小说。之后创建支线会更快。</p></details>
+      <details><summary>首章不满意怎么办？</summary><p>点“重新生成末章（保留原版）”，或先“删除末章”再“续写一章”。程序不会自动评分。</p></details>
+      <details><summary>为什么按钮是灰的？</summary><p>模型未就绪、并发已满、已有任务运行，或当前支线正在生成。等任务结束或到“我的模型”检查自己的 Key。</p></details>
+      <details><summary>分叉点选错了怎么办？</summary><p>分叉点不能修改。新建正确支线，确认满意后再删除旧支线。</p></details>
+      <details><summary>“第9章后”和“第八章”为什么对不上？</summary><p>程序会把前言、目录或超长章节拆成阅读段，内部段号不一定等于原书章号。请以章节标题为准。</p></details>
+      <details><summary>输出被截断或任务失败怎么办？</summary><p>这是技术失败，不会保存为正式章节。完整草稿会保留，可填写具体反馈后“按反馈修订”，或重新生成。</p></details>
+    </section>
+
+    <footer class="footer">
+      <p>需要回到工作台继续操作？<a href="/">打开小说工作台</a>。</p>
+    </footer>
+  </main>
+</div>
+</body>
+</html>

@@ -1,0 +1,16 @@
+{
+  "name": "local-novel-workbench",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "build": "esbuild frontend/main.jsx --bundle --minify --legal-comments=inline --target=es2020 --outfile=static/app.js"
+  },
+  "dependencies": {
+    "antd": "5.27.6",
+    "react": "19.2.0",
+    "react-dom": "19.2.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12"
+  }
+}
