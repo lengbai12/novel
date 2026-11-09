@@ -3,6 +3,9 @@ import {createRoot} from 'react-dom/client';
 import {Alert, AutoComplete, Button, Checkbox, Collapse, ConfigProvider, Drawer, Form, Input, InputNumber, Modal, Popconfirm, Progress, Select, Space, Tabs, Tag, Tree, Upload} from 'antd';
 import 'antd/dist/reset.css';
 import './style.css';
+import * as engine from '../src/engine.js';
+import {checkModel} from '../src/model.js';
+import {exportData, importData} from '../src/store.js';
 
 const PROVIDERS = {
   auto: {label: '自动识别（按 URL）'},
@@ -23,7 +26,6 @@ const VISITOR_PROVIDERS = {
   siliconflow: PROVIDERS.siliconflow,
   openai: PROVIDERS.openai
 };
-const LOCAL_UI = ['127.0.0.1', 'localhost', '::1', '[::1]'].includes(window.location.hostname);
 const VISITOR_DEFAULT = {provider: 'deepseek', api_url: 'https://api.deepseek.com', model: 'deepseek-flash', reasoning_effort: 'medium', api_key: ''};
 const loadVisitorModel = () => {
   try {
@@ -43,13 +45,13 @@ const chapterProse = (value, title) => {
   const lines = body.split('\n');
   return title && lines[0]?.trim() === String(title).trim() ? lines.slice(1).join('\n').trim() : body;
 };
-const encoded = encodeURIComponent;
-async function api(path, body) {
-  const response = await fetch(path, body === undefined ? {} : {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
-  let data;
-  try { data = await response.json(); } catch { throw new Error(`服务响应无效（HTTP ${response.status}）`); }
-  if (!response.ok) throw new Error(`${data.error || '请求失败'}（HTTP ${response.status}）`);
-  return data;
+function download(name, blob) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = name;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function App() {
@@ -66,6 +68,7 @@ function App() {
   const [importOpen, setImportOpen] = useState(false);
   const [file, setFile] = useState(null);
   const [importTitle, setImportTitle] = useState('');
+  const [pendingImport, setPendingImport] = useState(null);
   const [tab, setTab] = useState(store.get('tab') === 'branches' ? 'branches' : 'create');
   const [readerMode, setReaderMode] = useState('original');
   const [mobilePane, setMobilePane] = useState('reader');
@@ -76,7 +79,6 @@ function App() {
   const [autoScroll, setAutoScroll] = useState(true);
   const [copyState, setCopyState] = useState('');
   const [revisionFeedback, setRevisionFeedback] = useState('');
-  const [revisionChapter, setRevisionChapter] = useState(null);
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameTitle, setRenameTitle] = useState('');
   const [form] = Form.useForm();
@@ -97,20 +99,18 @@ function App() {
   const outputRef = useRef(null);
   const drawerOutputRef = useRef(null);
   const guard = fn => (...args) => Promise.resolve().then(() => fn(...args)).catch(e => setError(e.message || String(e)));
-  const atCapacity = status.capacity_available === undefined ? !!status.busy : status.capacity_available === false;
+  const atCapacity = status.capacity_available === false;
   const locked = !visitorReady || atCapacity || submitting || !!jobId || loading;
   const visitorLabel = visitorChecking ? '检测中…' : (!visitorModel.api_key && visitorModel.provider !== 'llama') ? '未配置模型' : visitorReady ? '我的模型就绪' : '模型未就绪';
   const visitorClass = visitorReady ? 'ready' : visitorChecking ? 'pending' : 'warn';
   const revisionAvailable = ['error', 'cancelled'].includes(job?.status) && typeof job?.draft === 'string' && !!job.draft.trim();
-  const legacyDraft = job?.draft_chapter == null;
-  const revisionTarget = legacyDraft ? revisionChapter : job?.draft_chapter;
-  const revisionMetadataReady = !!job?.id && !!(job?.branch_id || job?.result?.branch_id) && Number.isInteger(revisionTarget) && revisionTarget >= 1 && revisionTarget <= 100000;
+  const revisionMetadataReady = !!job?.id && !!(job?.branch_id || job?.result?.branch_id) && Number.isInteger(job?.draft_chapter) && job.draft_chapter >= 1 && job.draft_chapter <= 100000;
   const outputText = job?.preview || job?.draft || '';
   const draftText = typeof job?.draft === 'string' ? job.draft : '';
   const showDraft = !!draftText.trim() && !!job?.preview && draftText !== job.preview;
 
   async function refreshStatus() {
-    try { setStatus(await api('/api/status')); } catch { setStatus({model_ready: false, disconnected: true}); }
+    setStatus(await engine.status());
   }
   async function openSettings() {
     const saved = loadVisitorModel();
@@ -133,7 +133,7 @@ function App() {
     const config = {provider: values.provider, api_url: values.api_url.trim(), model: values.model.trim(), reasoning_effort: values.reasoning_effort, api_key: key};
     setSettingsSaving(true); setSettingsError(''); setVisitorChecking(true);
     try {
-      const result = await api('/api/model/check', config);
+      const result = await checkModel(config);
       if (!result.ready) {
         setVisitorReady(false); setVisitorError(result.error || '模型未就绪');
         setSettingsError(result.error || '模型未就绪，请检查地址、模型 ID 和 Key。');
@@ -159,7 +159,7 @@ function App() {
     }
     let alive = true;
     setVisitorChecking(true);
-    api('/api/model/check', visitorModel)
+    checkModel(visitorModel)
       .then(result => {
         if (!alive) return;
         setVisitorReady(!!result.ready);
@@ -173,7 +173,7 @@ function App() {
     return () => { alive = false; };
   }, [visitorModel]);
   async function refreshBooks() {
-    const data = await api('/api/books');
+    const data = await engine.listBooks();
     setBooks(data.books);
     return data.books;
   }
@@ -183,7 +183,7 @@ function App() {
     current.current.number = n;
     setNumber(n); setChapter(null);
     store.set('chapter', n);
-    const data = await api(`/api/books/${encoded(id)}/chapters/${n}`);
+    const data = await engine.getChapter(id, n);
     if (request !== current.current.chapterRequest || String(current.current.book?.id) !== String(id)) return;
     setChapter(data);
   }
@@ -191,7 +191,7 @@ function App() {
     const bookId = current.current.book?.id;
     const request = ++current.current.branchRequest;
     setBranch(null); current.current.branch = null;
-    const data = await api(`/api/branches/${encoded(id)}`);
+    const data = await engine.getBranch(id);
     if (request !== current.current.branchRequest || String(current.current.book?.id) !== String(bookId)) return;
     if (String(data.book_id) !== String(bookId)) throw new Error('支线不属于当前小说');
     current.current.branch = data; setBranch(data); store.set('branch', data.id);
@@ -199,14 +199,14 @@ function App() {
   }
   async function refreshBookState() {
     if (!current.current.book?.id) return null;
-    const updated = await api(`/api/books/${encoded(current.current.book.id)}`);
+    const updated = await engine.getBook(current.current.book.id);
     current.current.book = updated; setBook(updated);
     return updated;
   }
   async function renameSelectedBranch() {
     const title = renameTitle.trim();
     if (!branch || !title) return;
-    await api(`/api/branches/${encoded(branch.id)}/rename`, {title});
+    await engine.renameBranch(branch.id, {title});
     setRenameOpen(false);
     await refreshBookState();
     await openBranch(branch.id, false);
@@ -214,7 +214,7 @@ function App() {
   }
   async function truncateSelectedBranch() {
     if (!branch) return;
-    await api(`/api/branches/${encoded(branch.id)}/truncate`, {});
+    await engine.truncateBranch(branch.id);
     await refreshBookState();
     await openBranch(branch.id, false);
     await refreshBooks();
@@ -222,7 +222,7 @@ function App() {
   async function deleteSelectedBranch() {
     if (!branch) return;
     const removed = branch.id;
-    await api(`/api/branches/${encoded(branch.id)}/delete`, {});
+    await engine.deleteBranch(branch.id);
     const updated = await refreshBookState();
     const next = updated?.branches.find(item => item.id !== removed);
     if (next) await openBranch(next.id, false);
@@ -238,7 +238,7 @@ function App() {
     current.current.book = null; current.current.branch = null;
     setBook(null); setBranch(null); setChapter(null); setLoading(true); setReaderMode('original');
     try {
-      const data = await api(`/api/books/${encoded(id)}`);
+      const data = await engine.getBook(id);
       if (request !== current.current.bookRequest) return;
       current.current.book = data; setBook(data); store.set('book', id);
       const n = restore ? Math.max(1, Math.min(data.chapter_count, Number(store.get('chapter')) || 1)) : 1;
@@ -250,12 +250,29 @@ function App() {
       if (savedBranch && data.branches.some(b => String(b.id) === savedBranch)) await openBranch(savedBranch, false);
     } finally { if (request === current.current.bookRequest) setLoading(false); }
   }
+  async function reloadLibrary() {
+    const list = await refreshBooks();
+    if (list.length) await openBook(list[0].id);
+    else {
+      store.set('book', null); store.set('branch', null);
+      current.current.book = null; current.current.branch = null;
+      setBook(null); setBranch(null); setChapter(null); setReaderMode('original');
+    }
+  }
+  async function replaceData() {
+    await importData(pendingImport);
+    setPendingImport(null);
+    await reloadLibrary();
+  }
+  async function exportAll() {
+    download('novel-if-data.json', new Blob([await exportData()], {type: 'application/json'}));
+  }
   async function refreshAfterJob(completed) {
     await refreshBooks();
     const selected = current.current.book;
     if (!selected || (completed.result?.book_id && String(completed.result.book_id) !== String(selected.id))) return;
     const request = current.current.bookRequest;
-    const updated = await api(`/api/books/${encoded(selected.id)}`);
+    const updated = await engine.getBook(selected.id);
     if (request !== current.current.bookRequest || current.current.book?.id !== selected.id) return;
     current.current.book = updated; setBook(updated);
     await openChapter(current.current.number, selected.id);
@@ -263,22 +280,23 @@ function App() {
     const branchId = completed.result?.branch_id || current.current.branch?.id;
     if (branchId && updated.branches.some(b => String(b.id) === String(branchId))) await openBranch(branchId, !!completed.result?.branch_id);
   }
-  async function beginJob(path, body) {
+  async function beginJob(launch) {
     if (current.current.submitting || current.current.jobId || !visitorReady || atCapacity) throw new Error('你的模型未就绪、并发容量已满或本窗口已有任务');
     if (!visitorModel.api_key && visitorModel.provider !== 'llama') throw new Error('请先在“我的模型”中填写 API Key');
     current.current.submitting = true; setSubmitting(true); setError('');
     try {
-      const data = await api(path, {...(body || {}), model: visitorModel});
+      const data = await launch(visitorModel);
       current.current.jobId = String(data.job_id); store.set('job', data.job_id);
       setJob(null); setJobId(String(data.job_id));
     } finally { current.current.submitting = false; setSubmitting(false); }
   }
   async function reviseDraft() {
     if (!revisionAvailable || !revisionMetadataReady || !revisionFeedback.trim() || locked) throw new Error('请填写编辑反馈和有效的草稿章号，并等待模型可用');
-    await beginJob(`/api/jobs/${encoded(job.id)}/revise`, {feedback: revisionFeedback.trim(), ...(legacyDraft ? {chapter: revisionChapter} : {})});
-    setRevisionFeedback(''); setRevisionChapter(null);
+    const feedback = revisionFeedback.trim();
+    await beginJob(model => engine.startRevise(job.id, {feedback, model}));
+    setRevisionFeedback('');
   }
-  useEffect(() => { setRevisionFeedback(''); setRevisionChapter(null); }, [job?.id]);
+  useEffect(() => { setRevisionFeedback(''); }, [job?.id]);
   useEffect(() => {
     if (!autoScroll || job?.status !== 'running') return;
     for (const element of [outputRef.current, drawerOutputRef.current]) {
@@ -375,7 +393,7 @@ function App() {
     let alive = true, timer;
     async function poll() {
       try {
-        const data = await api(`/api/jobs/${encoded(jobId)}`);
+        const data = await engine.getJob(jobId);
         if (!alive) return;
         setJob(data);
         if (['done', 'error', 'cancelled'].includes(data.status)) {
@@ -385,7 +403,7 @@ function App() {
         }
       } catch (e) {
         if (!alive) return;
-        if (/HTTP 404|不存在|not found/i.test(e.message)) {
+        if (/任务不存在/.test(e.message)) {
           current.current.jobId = null; store.set('job', null); setJobId(null); setError('无法恢复任务：' + e.message); return;
         }
         setJob(previous => ({...previous, stage: e.message + '；自动重试中'}));
@@ -402,53 +420,48 @@ function App() {
     if (file.size > 32 * 1024 * 1024) throw new Error('文件不能超过 32 MiB');
     setImporting(true);
     try {
-      const content = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result).split(',')[1]);
-        reader.onerror = () => reject(new Error('无法读取文件'));
-        reader.readAsDataURL(file);
-      });
-      const data = await api('/api/books', {filename: file.name, title: importTitle.trim() || undefined, content_base64: content});
-      await refreshBooks(); await openBook(data.id || data.book_id);
+      const data = await engine.importBook({filename: file.name, title: importTitle.trim() || undefined, buffer: await file.arrayBuffer()});
+      await refreshBooks(); await openBook(data.id);
       setImportOpen(false); setFile(null); setImportTitle('');
     } finally { setImporting(false); }
   }
   const forkHere = () => { form.setFieldValue('fork_chapter', number); setTab('create'); store.set('tab', 'create'); setMobilePane('if'); };
+  const exportBranch = () => download(`${branch.title}.txt`, new Blob([`${branch.title}\n\nIF目标：${branch.premise}\n\n${branch.chapters.map(c => c.text).join('\n\n')}`], {type: 'text/plain;charset=utf-8'}));
   const toc = <div className="toc-content"><div className="pane-heading">章节 <span>{book?.chapter_count || 0} · 已理解 {book?.read_chapters || 0}</span></div><Tree blockNode selectedKeys={[String(number)]} treeData={(book?.chapters || []).map(c => ({key: String(c.number), title: <span>{c.read && <span className="read-mark">✓</span>}{c.title}</span>}))} onSelect={keys => { if (keys.length) { setReaderMode('original'); setTocOpen(false); setMobilePane('reader'); guard(openChapter)(Number(keys[0])); } }}/></div>;
   const branchOptions = (book?.branches || []).map(b => ({value: b.id, label: `${b.title}${b.chapter_count ? ` · ${b.chapter_count}章` : ''}${b.created_at ? ` · ${b.created_at.slice(5, 16)}` : ''}`}));
   const createForkTitle = book?.chapters?.find(c => c.number === createFork)?.title;
   const ifPane = <section className="if-content" aria-label="IF 工作区"><Tabs activeKey={tab} onChange={value => { setTab(value); store.set('tab', value); }} items={[
-    {key: 'create', label: '创建 IF', children: <Form form={form} layout="vertical" initialValues={{chapter_words: 1200, fork_chapter: 1}} onFinish={guard(values => beginJob(`/api/books/${encoded(book.id)}/branches`, {...values, title: values.title.trim(), premise: values.premise.trim(), style: values.style?.trim() || ''}))}>
-      <Form.Item label="支线名称" name="title" rules={[{required: true, whitespace: true, message: '填写支线名称'}]}><Input aria-label="支线名称" maxLength={200}/></Form.Item>
+    {key: 'create', label: '创建 IF', children: <Form form={form} layout="vertical" initialValues={{chapter_words: 1200, fork_chapter: 1}} onFinish={guard(values => beginJob(model => engine.startBranch(book.id, {...values, title: values.title.trim(), premise: values.premise.trim(), style: values.style?.trim() || '', model})))}>
+      <Form.Item label="支线名称" name="title" rules={[{required: true, whitespace: true, message: '填写支线名称'}]}><Input aria-label="支线名称"/></Form.Item>
       <Form.Item label="分叉章节（仅沿用分歧前事实）" name="fork_chapter" rules={[{required: true}]}><Select aria-label="分叉章节" options={[{value: 0, label: '故事开始前（不采用原作剧情）'}, ...(book?.chapters || []).map(c => ({value: c.number, label: c.title + ' 之后'}))]}/></Form.Item>
       <div className="fork-hint">{createFork ? <>分歧点：<strong>{createForkTitle || `阅读段 ${createFork}`} 之后</strong>。该章结束前的事实保留，之后原作全部作废。</> : '分歧点：故事开始前。原作剧情不采用。'}</div>
-      <Form.Item label="IF 设定 / 转折点" name="premise" rules={[{required: true, whitespace: true, message: '填写 IF 设定'}]}><Input.TextArea aria-label="IF 设定" maxLength={6000} rows={6}/></Form.Item>
-      <Form.Item label="写作风格（可选）" name="style"><Input.TextArea aria-label="写作风格" maxLength={2000} rows={3}/></Form.Item>
-      <Form.Item label="每章字数" name="chapter_words" rules={[{required: true}, {type: 'number', min: 400, max: 4000}]}><InputNumber aria-label="每章字数" min={400} max={4000} step={100}/></Form.Item>
+      <Form.Item label="IF 设定 / 转折点" name="premise" rules={[{required: true, whitespace: true, message: '填写 IF 设定'}]}><Input.TextArea aria-label="IF 设定" rows={6}/></Form.Item>
+      <Form.Item label="写作风格（可选）" name="style"><Input.TextArea aria-label="写作风格" rows={3}/></Form.Item>
+      <Form.Item label="每章字数" name="chapter_words" rules={[{required: true}]}><InputNumber aria-label="每章字数" step={100}/></Form.Item>
       <Button type="primary" htmlType="submit" block disabled={!book || locked} loading={submitting}>创建支线并写首章</Button>
     </Form>},
-    {key: 'branches', label: `支线 ${book?.branches?.length || 0}`, children: <><Select aria-label="选择支线" placeholder="选择支线" value={branch?.id} options={branchOptions} onChange={guard(id => openBranch(id, false))} className="full-width" popupMatchSelectWidth={340}/>{branch ? <><div className="fork-card"><div className="fork-kicker">开篇位置</div><div className="fork-title">{branch.fork_chapter ? `${branch.fork_title || `阅读段 ${branch.fork_chapter}`} 之后` : '故事开始前'}</div><div className="fork-book">《{branch.book_title || book?.title}》</div><p>{branch.fork_chapter ? '只保留该章结束前的事实；这一章之后的原作全部作废。' : '不采用原作剧情，从故事开始前改写。'}</p>{branch.fork_excerpt && <details className="fork-excerpt"><summary>查看分歧点原文尾段</summary><pre>{branch.fork_excerpt}</pre></details>}</div><div className="branch-meta"><span>{branch.chapters.length} 章</span><span>{branch.chapter_words} 字/章</span><span>{branch.fork_chapter ? '从原作分叉' : '故事开始前'}</span></div><Space direction="vertical" className="branch-actions"><Button type="primary" disabled={locked} onClick={guard(() => beginJob(`/api/branches/${encoded(branch.id)}/continue`, {}))}>续写一章</Button><Button disabled={locked} onClick={guard(() => beginJob(`/api/branches/${encoded(branch.id)}/regenerate`, {}))}>{branch.chapters.length ? '重新生成末章（保留原版）' : '重新生成首章'}</Button><Button onClick={() => { setReaderMode('branch'); setMobilePane('reader'); }}>阅读支线</Button><Button href={`/api/branches/${encoded(branch.id)}/export`} download>导出 TXT</Button></Space><div className="branch-section"><div className="branch-section-head">已写章节 <span>{branch.chapters.length}</span></div>{branch.chapters.length ? <div className="branch-chapter-list">{branch.chapters.map(c => <button type="button" key={c.number} className="branch-chapter" onClick={() => { setReaderMode('branch'); setMobilePane('reader'); }}><span className="branch-chapter-num">{c.number}</span><span className="branch-chapter-title">{c.title}</span><span className="branch-chapter-count">{c.text.length} 字</span></button>)}</div> : <div className="branch-empty">还没有正文。点“续写一章”开始。</div>}</div><div className="branch-admin"><Button size="small" disabled={submitting} onClick={() => { setRenameTitle(branch.title); setRenameOpen(true); }}>重命名</Button><Popconfirm title="删除最后一章？" description={`将删除第 ${branch.chapters.length} 章正文，其他章保留；之后可重新续写。`} okText="删除" cancelText="取消" okButtonProps={{danger: true}} disabled={submitting || !branch.chapters.length} onConfirm={guard(truncateSelectedBranch)}><Button size="small" disabled={submitting || !branch.chapters.length}>删除末章</Button></Popconfirm><Popconfirm title="删除整条支线？" description="正文和支线记忆会一并删除，无法恢复；原书不受影响。" okText="删除" cancelText="取消" okButtonProps={{danger: true}} disabled={submitting} onConfirm={guard(deleteSelectedBranch)}><Button size="small" danger type="text" disabled={submitting}>删除支线</Button></Popconfirm></div><p className="branch-note">不进行自动评分，质量只由你的阅读感受决定。重新生成会新建支线并保留原版；“删除末章”只移除最后一条正文，便于重写。</p><Collapse className="details" items={[{key: 'premise', label: '设定 / 风格', children: <pre>{branch.premise}{branch.style ? '\n\n' + branch.style : ''}</pre>}, {key: 'outline', label: '支线大纲', children: <pre>{describe(branch.outline)}</pre>}]}/><Collapse className="details" items={[{key: 'all', label: `全部支线（${book?.branches?.length || 0}）`, children: <div className="branch-overview-list">{(book?.branches || []).map(item => <button type="button" key={item.id} className={`branch-overview-item ${item.id === branch.id ? 'active' : ''}`} onClick={guard(() => openBranch(item.id, false))}><span className="branch-overview-title">{item.title}</span><span className="branch-overview-meta">{item.created_at ? `${item.created_at.slice(5, 16)} · ` : ''}{item.fork_chapter ? `从「${item.fork_title || `阅读段 ${item.fork_chapter}`}」之后` : '故事开始前'} · {item.chapter_count} 章</span></button>)}</div>}]}/></> : <div className="branch-empty-state">选择一条支线查看开篇位置和管理操作，或到“创建 IF”新建。</div>}</>}
+    {key: 'branches', label: `支线 ${book?.branches?.length || 0}`, children: <><Select aria-label="选择支线" placeholder="选择支线" value={branch?.id} options={branchOptions} onChange={guard(id => openBranch(id, false))} className="full-width" popupMatchSelectWidth={340}/>{branch ? <><div className="fork-card"><div className="fork-kicker">开篇位置</div><div className="fork-title">{branch.fork_chapter ? `${branch.fork_title || `阅读段 ${branch.fork_chapter}`} 之后` : '故事开始前'}</div><div className="fork-book">《{branch.book_title || book?.title}》</div><p>{branch.fork_chapter ? '只保留该章结束前的事实；这一章之后的原作全部作废。' : '不采用原作剧情，从故事开始前改写。'}</p>{branch.fork_excerpt && <details className="fork-excerpt"><summary>查看分歧点原文尾段</summary><pre>{branch.fork_excerpt}</pre></details>}</div><div className="branch-meta"><span>{branch.chapters.length} 章</span><span>{branch.chapter_words} 字/章</span><span>{branch.fork_chapter ? '从原作分叉' : '故事开始前'}</span></div><Space direction="vertical" className="branch-actions"><Button type="primary" disabled={locked} onClick={guard(() => beginJob(model => engine.startContinue(branch.id, {model})))}>续写一章</Button><Button disabled={locked} onClick={guard(() => beginJob(model => engine.startRegenerate(branch.id, {model})))}>{branch.chapters.length ? '重新生成末章（保留原版）' : '重新生成首章'}</Button><Button onClick={() => { setReaderMode('branch'); setMobilePane('reader'); }}>阅读支线</Button><Button onClick={exportBranch}>导出 TXT</Button></Space><div className="branch-section"><div className="branch-section-head">已写章节 <span>{branch.chapters.length}</span></div>{branch.chapters.length ? <div className="branch-chapter-list">{branch.chapters.map(c => <button type="button" key={c.number} className="branch-chapter" onClick={() => { setReaderMode('branch'); setMobilePane('reader'); }}><span className="branch-chapter-num">{c.number}</span><span className="branch-chapter-title">{c.title}</span><span className="branch-chapter-count">{c.text.length} 字</span></button>)}</div> : <div className="branch-empty">还没有正文。点“续写一章”开始。</div>}</div><div className="branch-admin"><Button size="small" disabled={submitting} onClick={() => { setRenameTitle(branch.title); setRenameOpen(true); }}>重命名</Button><Popconfirm title="删除最后一章？" description={`将删除第 ${branch.chapters.length} 章正文，其他章保留；之后可重新续写。`} okText="删除" cancelText="取消" okButtonProps={{danger: true}} disabled={submitting || !branch.chapters.length} onConfirm={guard(truncateSelectedBranch)}><Button size="small" disabled={submitting || !branch.chapters.length}>删除末章</Button></Popconfirm><Popconfirm title="删除整条支线？" description="正文和支线记忆会一并删除，无法恢复；原书不受影响。" okText="删除" cancelText="取消" okButtonProps={{danger: true}} disabled={submitting} onConfirm={guard(deleteSelectedBranch)}><Button size="small" danger type="text" disabled={submitting}>删除支线</Button></Popconfirm></div><p className="branch-note">不进行自动评分，质量只由你的阅读感受决定。重新生成会新建支线并保留原版；“删除末章”只移除最后一条正文，便于重写。</p><Collapse className="details" items={[{key: 'premise', label: '设定 / 风格', children: <pre>{branch.premise}{branch.style ? '\n\n' + branch.style : ''}</pre>}, {key: 'outline', label: '支线大纲', children: <pre>{describe(branch.outline)}</pre>}]}/><Collapse className="details" items={[{key: 'all', label: `全部支线（${book?.branches?.length || 0}）`, children: <div className="branch-overview-list">{(book?.branches || []).map(item => <button type="button" key={item.id} className={`branch-overview-item ${item.id === branch.id ? 'active' : ''}`} onClick={guard(() => openBranch(item.id, false))}><span className="branch-overview-title">{item.title}</span><span className="branch-overview-meta">{item.created_at ? `${item.created_at.slice(5, 16)} · ` : ''}{item.fork_chapter ? `从「${item.fork_title || `阅读段 ${item.fork_chapter}`}」之后` : '故事开始前'} · {item.chapter_count} 章</span></button>)}</div>}]}/></> : <div className="branch-empty-state">选择一条支线查看开篇位置和管理操作，或到“创建 IF”新建。</div>}</>}
   ]}/></section>;
   return <ConfigProvider componentSize="middle" wave={{disabled: true}} theme={{token: {borderRadius: 8, borderRadiusLG: 14, colorPrimary: '#2f6b5f', colorInfo: '#2f6b5f', colorText: '#252a2e', colorTextSecondary: '#70777b', colorBorder: '#e0dacd', colorBgContainer: '#fffdf8', colorBgLayout: '#f1eee7', colorLink: '#2f6b5f', fontSize: 13.5, controlHeight: 32}, components: {Button: {primaryShadow: '0 2px 8px rgba(47, 107, 95, .22)', defaultShadow: 'none', fontWeight: 500}, Select: {optionSelectedBg: '#e7f0ec'}, Collapse: {headerPadding: '8px 12px', contentPadding: '8px 12px'}}}}>
     <div className="workbench">
-      <header className="toolbar"><div className="brand-block"><span className="brand">小说工作台</span><span className="brand-sub">长文本理解 · 无矛盾改写 · IF 续写</span></div><Select aria-label="选择小说" className="book-select" placeholder="选择小说" value={book?.id} loading={loading} options={books.map(b => ({value: b.id, label: b.title}))} onChange={guard(id => openBook(id))}/><Button onClick={() => setImportOpen(true)}>导入</Button><Button onClick={openSettings}>我的模型</Button><Button className="help-button" href="/help" target="_blank" rel="noopener noreferrer" aria-label="打开使用帮助">帮助</Button><Tag bordered={false} className={`model-status ${visitorClass}`} color={visitorReady ? 'success' : 'warning'} title={`${VISITOR_PROVIDERS[visitorModel.provider]?.label || visitorModel.provider} · ${visitorModel.model} · 思考：${visitorModel.reasoning_effort} · 任务 ${status.active_jobs ?? (status.busy ? 1 : 0)}/${status.max_concurrency ?? 1}`}>{status.disconnected ? '服务离线' : visitorLabel} · {status.active_jobs ?? (status.busy ? 1 : 0)}/{status.max_concurrency ?? 1}</Tag></header>
+      <header className="toolbar"><div className="brand-block"><span className="brand">小说工作台</span></div><Select aria-label="选择小说" className="book-select" placeholder="选择小说" value={book?.id} loading={loading} options={books.map(b => ({value: b.id, label: b.title}))} onChange={guard(id => openBook(id))}/><Button onClick={() => setImportOpen(true)}>导入</Button><Button onClick={openSettings}>我的模型</Button><Button onClick={guard(exportAll)}>导出数据</Button><Upload accept=".json,application/json" showUploadList={false} disabled={!!jobId || submitting} beforeUpload={selected => { guard(async () => setPendingImport(await selected.text()))(); return false; }}><Button disabled={!!jobId || submitting}>导入数据</Button></Upload><Button className="help-button" href="help.html" target="_blank" rel="noopener noreferrer" aria-label="打开使用帮助">帮助</Button><Tag bordered={false} className={`model-status ${visitorClass}`} color={visitorReady ? 'success' : 'warning'} title={`${VISITOR_PROVIDERS[visitorModel.provider]?.label || visitorModel.provider} · ${visitorModel.model} · 思考：${visitorModel.reasoning_effort} · 任务 ${status.active_jobs ?? 0}/${status.max_concurrency ?? 1}`}>{visitorLabel} · {status.active_jobs ?? 0}/{status.max_concurrency ?? 1}</Tag></header>
       {error && <Alert type="error" message={error} closable onClose={() => setError('')} showIcon/>}
-      {(job || jobId) && <section className="job-panel" aria-label="后台任务"><div className="job-row"><span role="status" className={`job-status ${job?.status || 'queued'}`}>{({done: '任务完成', error: '任务失败', cancelled: '已取消', running: '运行中', queued: '排队中'})[job?.status] || '提交成功'} · {job?.stage || ''}</span><Space size={6} wrap><span className="job-meta">{outputText.length} 字{job?.reasoning_chars ? ` · 思考 ${job.reasoning_chars} 字` : ''}</span>{jobId ? <Button danger onClick={guard(async () => { await api(`/api/jobs/${encoded(jobId)}/cancel`, {}); setJob(j => ({...j, stage: '已请求取消'})); })}>取消任务</Button> : <Button type="text" onClick={() => setJob(null)}>关闭</Button>}</Space></div><Progress aria-label="任务进度" percent={job?.total ? Math.min(100, Math.round(100 * (job.progress || 0) / job.total)) : 0} status={job?.status === 'error' ? 'exception' : job?.status === 'done' ? 'success' : 'active'} size="small" format={() => job?.total ? `${job.progress || 0}/${job.total}` : ''}/>
+      {(job || jobId) && <section className="job-panel" aria-label="后台任务"><div className="job-row"><span role="status" className={`job-status ${job?.status || 'queued'}`}>{({done: '任务完成', error: '任务失败', cancelled: '已取消', running: '运行中', queued: '排队中'})[job?.status] || '提交成功'} · {job?.stage || ''}</span><Space size={6} wrap><span className="job-meta">{outputText.length} 字{job?.reasoning_chars ? ` · 思考 ${job.reasoning_chars} 字` : ''}</span>{jobId ? <Button danger onClick={guard(async () => { await engine.cancelJob(jobId); setJob(j => ({...j, stage: '已请求取消'})); })}>取消任务</Button> : <Button type="text" onClick={() => setJob(null)}>关闭</Button>}</Space></div><Progress aria-label="任务进度" percent={job?.total ? Math.min(100, Math.round(100 * (job.progress || 0) / job.total)) : 0} status={job?.status === 'error' ? 'exception' : job?.status === 'done' ? 'success' : 'active'} size="small" format={() => job?.total ? `${job.progress || 0}/${job.total}` : ''}/>
         <div className="job-output-wrap"><div className="job-output-bar"><span>模型输出{job?.status === 'running' ? ' · 实时' : ''}</span><Space size={10} wrap><Checkbox checked={autoScroll} onChange={event => setAutoScroll(event.target.checked)}>自动滚动</Checkbox><Button type="link" size="small" disabled={!outputText} onClick={() => copyOutput(outputText)}>{copyState || '复制'}</Button><Button type="link" size="small" disabled={!outputText} onClick={() => setOutputOpen(true)}>放大查看</Button></Space></div><pre className="job-output" ref={outputRef}>{outputText || '等待模型输出…'}</pre></div>
         {showDraft && <div className="job-output-wrap"><div className="job-output-bar"><span>{job?.published ? '本次正文（已保存）' : '最后完整草稿（未保存）'}</span><Space size={10}><Button type="link" size="small" onClick={() => copyOutput(draftText)}>{copyState || '复制'}</Button><Button type="link" size="small" onClick={() => setOutputOpen(true)}>放大查看</Button></Space></div><pre className="job-output job-draft">{draftText}</pre></div>}
         {revisionAvailable && <div className="draft-revision">
-          <Input.TextArea aria-label="草稿修订反馈" placeholder="填写编辑反馈；仅修订此任务的未发布草稿，不覆盖已保存章节" maxLength={8000} showCount autoSize={{minRows: 2, maxRows: 4}} value={revisionFeedback} onChange={event => setRevisionFeedback(event.target.value)} disabled={submitting}/>
+          <Input.TextArea aria-label="草稿修订反馈" placeholder="填写编辑反馈；仅修订此任务的未发布草稿，不覆盖已保存章节" showCount autoSize={{minRows: 2, maxRows: 4}} value={revisionFeedback} onChange={event => setRevisionFeedback(event.target.value)} disabled={submitting}/>
           <div className="draft-revision-actions">
-            {legacyDraft ? <label className="draft-chapter-label">草稿 IF 章号 <InputNumber aria-label="草稿 IF 章号" min={1} max={100000} precision={0} value={revisionChapter} onChange={setRevisionChapter} disabled={submitting} placeholder="请明确填写"/></label> : <span>草稿 IF 第 {job.draft_chapter} 章 · 未发布</span>}
+            <span>草稿 IF 第 {job.draft_chapter} 章 · 未发布</span>
             <Button type="primary" loading={submitting} disabled={locked || !revisionMetadataReady || !revisionFeedback.trim()} onClick={guard(reviseDraft)}>按反馈修订</Button>
           </div>
           {!(job?.id && (job?.branch_id || job?.result?.branch_id)) && <span className="draft-revision-note">任务缺少来源或 IF 支线信息，无法修订。</span>}
         </div>}
       </section>}
-      <div className="mobile-navigation"><Button onClick={() => setTocOpen(true)} disabled={!book}>章节</Button><Tabs activeKey={mobilePane} onChange={setMobilePane} items={[{key: 'reader', label: '阅读'}, {key: 'if', label: 'IF / 支线'}]}/><Button className="help-mobile" href="/help" target="_blank" rel="noopener noreferrer" aria-label="打开使用帮助">帮助</Button></div>
+      <div className="mobile-navigation"><Button onClick={() => setTocOpen(true)} disabled={!book}>章节</Button><Tabs activeKey={mobilePane} onChange={setMobilePane} items={[{key: 'reader', label: '阅读'}, {key: 'if', label: 'IF / 支线'}]}/><Button className="help-mobile" href="help.html" target="_blank" rel="noopener noreferrer" aria-label="打开使用帮助">帮助</Button></div>
       <main className="workspace"><aside className="toc-pane">{toc}</aside><section className={`reader-pane ${mobilePane !== 'reader' ? 'mobile-hidden' : ''}`} aria-label="正文阅读"><div className="reader-toolbar"><Tabs activeKey={readerMode} onChange={setReaderMode} items={[{key: 'original', label: '原作'}, {key: 'branch', label: 'IF 正文', disabled: !branch}]}/>{readerMode === 'original' && <Space><Button aria-label="上一章" disabled={!chapter || number <= 1} onClick={guard(() => openChapter(number - 1))}>上一章</Button><Button aria-label="下一章" disabled={!chapter || number >= book?.chapter_count} onClick={guard(() => openChapter(number + 1))}>下一章</Button></Space>}</div><article className="prose-scroll" key={`${book?.id}-${readerMode}-${number}-${branch?.id}`}>
         {readerMode === 'original' ? chapter ? <><h1>{chapter.title}</h1><div className="prose">{chapterProse(chapter.text, chapter.title)}</div><Collapse className="details" items={[{key: 'memory', label: '累计记忆', children: <pre>{describe(chapter.memory) || '尚未理解本章'}</pre>}]}/></> : <div className="empty-text">{loading || book ? '加载章节…' : '导入 TXT / EPUB 或选择小说'}</div> : <Collapse ghost defaultActiveKey={(branch?.chapters || []).map((_, i) => String(i))} items={(branch?.chapters || []).map((c, i) => ({key: String(i), label: c.title, children: <div className="prose">{chapterProse(c.text, c.title)}</div>}))}/>}
-      </article>{readerMode === 'original' && <footer className="reader-actions"><Button disabled={!chapter || locked} onClick={guard(() => beginJob(`/api/books/${encoded(book.id)}/read`, {through: number}))}>理解至本章</Button><Button disabled={!book || locked} onClick={guard(() => beginJob(`/api/books/${encoded(book.id)}/read`, {through: book.chapter_count}))}>理解全书</Button><Button disabled={!chapter} onClick={forkHere}>从本章后分叉</Button></footer>}</section><aside className={`if-pane ${mobilePane !== 'if' ? 'mobile-hidden' : ''}`}>{ifPane}</aside></main>
+      </article>{readerMode === 'original' && <footer className="reader-actions"><Button disabled={!chapter || locked} onClick={guard(() => beginJob(model => engine.startRead(book.id, {through: number, model})))}>理解至本章</Button><Button disabled={!book || locked} onClick={guard(() => beginJob(model => engine.startRead(book.id, {through: book.chapter_count, model})))}>理解全书</Button><Button disabled={!chapter} onClick={forkHere}>从本章后分叉</Button></footer>}</section><aside className={`if-pane ${mobilePane !== 'if' ? 'mobile-hidden' : ''}`}>{ifPane}</aside></main>
       <Drawer title="章节" placement="left" width={300} open={tocOpen} onClose={() => setTocOpen(false)}>{toc}</Drawer>
       <Drawer title="模型输出" placement="right" width="min(980px, 94vw)" open={outputOpen} onClose={() => setOutputOpen(false)} extra={<Space size={8}><Checkbox checked={autoScroll} onChange={event => setAutoScroll(event.target.checked)}>自动滚动</Checkbox><Button disabled={!outputText} onClick={() => copyOutput(outputText)}>{copyState || '复制'}</Button></Space>}>
         <div className="job-output-bar"><span>{job?.stage || '模型输出'} · {outputText.length} 字{job?.reasoning_chars ? ` · 思考 ${job.reasoning_chars} 字` : ''}</span><span>{job?.model || ''}</span></div>
@@ -457,14 +470,14 @@ function App() {
       </Drawer>
       <Modal title="我的模型" open={settingsOpen} onCancel={closeSettings} onOk={saveSettings} confirmLoading={settingsSaving} okText="保存并测试" cancelText="取消" cancelButtonProps={{disabled: settingsSaving}} okButtonProps={{disabled: settingsSaving || settingsLoading}}>
         {settingsError && <Alert type="error" message={settingsError} showIcon/>}
-        <Alert className="settings-hint" type="info" showIcon message="模型由你提供：API Key 只保存在本浏览器，提交任务时发送到服务端内存，不写入数据库。请勿在公用电脑保存。"/>
+        <Alert className="settings-hint" type="info" showIcon message="模型由你提供：API Key 只保存在本浏览器的 localStorage 中，只发送给你设置的模型接口。请勿在公用电脑保存。"/>
         <Form form={settingsForm} layout="vertical" disabled={settingsLoading || settingsSaving} autoComplete="off" onValuesChange={changed => { setSettingsError(''); const preset = VISITOR_PROVIDERS[changed.provider]; if (preset?.api_url) settingsForm.setFieldsValue({api_url: preset.api_url, model: preset.model}); }}>
-          <Form.Item label="接口类型" name="provider" rules={[{required: true}]}><Select aria-label="接口类型" options={Object.entries(VISITOR_PROVIDERS).filter(([value]) => LOCAL_UI || value !== 'llama').map(([value, preset]) => ({value, label: preset.label}))}/></Form.Item>
+          <Form.Item label="接口类型" name="provider" rules={[{required: true}]}><Select aria-label="接口类型" options={Object.entries(VISITOR_PROVIDERS).map(([value, preset]) => ({value, label: preset.label}))}/></Form.Item>
           {settingsProvider === 'deepseek' && <Alert className="settings-hint" type="info" showIcon message="DeepSeek：模型 deepseek-flash / deepseek-v4-pro；使用你自己的 DeepSeek API Key。"/>
-            || settingsProvider === 'llama' && <Alert className="settings-hint" type="warning" showIcon message="本地 llama.cpp 仅限在本机通过 http://127.0.0.1:8080 访问时使用；公网域名会拒绝本地/内网地址。通常不需要 API Key。"/>
-            || settingsProvider === 'siliconflow' && <Alert className="settings-hint" type="info" showIcon message="SiliconFlow：使用你自己的 SiliconFlow API Key，模型 ID 以服务端为准。"/>
-            || <Alert className="settings-hint" type="info" showIcon message="自定义 OpenAI 兼容接口：必须是公网 HTTPS 地址，使用你自己的 Key。"/>}
-          <Form.Item label="API URL（OpenAI 兼容基础地址）" name="api_url" rules={[{required: true, whitespace: true, message: '填写 API URL'}, {type: 'url', message: '填写完整的 https:// URL'}, {validator: (_, value) => !value || /^https?:\/\//.test(value) ? Promise.resolve() : Promise.reject(new Error('填写 http:// 或 https:// 地址'))}]}><Input aria-label="API URL" placeholder="https://api.deepseek.com"/></Form.Item>
+            || settingsProvider === 'llama' && <Alert className="settings-hint" type="warning" showIcon message="本地 llama.cpp 需在本机运行，并允许浏览器跨域访问（CORS）；通常不需要 API Key。"/>
+            || settingsProvider === 'siliconflow' && <Alert className="settings-hint" type="info" showIcon message="SiliconFlow：使用你自己的 SiliconFlow API Key，模型 ID 以 SiliconFlow 为准。"/>
+            || <Alert className="settings-hint" type="info" showIcon message="自定义 OpenAI 兼容接口：需允许浏览器跨域访问；使用你自己的 Key。"/>}
+          <Form.Item label="API URL（OpenAI 兼容基础地址）" name="api_url" rules={[{required: true, whitespace: true, message: '填写 API URL'}]}><Input aria-label="API URL" placeholder="https://api.deepseek.com"/></Form.Item>
           <Form.Item label="模型 ID" name="model" rules={[{required: true, whitespace: true, message: '填写模型 ID'}]}><AutoComplete aria-label="模型 ID" placeholder={settingsProvider === 'deepseek' ? 'deepseek-flash 或 deepseek-v4-pro' : '填写模型 ID'} options={(MODEL_SUGGESTIONS[settingsProvider] || []).map(value => ({value}))}/></Form.Item>
           <Form.Item label={settingsProvider === 'deepseek' ? '思考强度（映射到官方 none/low/high/max）' : '思考强度'} name="reasoning_effort" rules={[{required: true}]}><Select aria-label="思考强度" options={settingsProvider === 'deepseek' ? [{value: 'none', label: '关闭'}, {value: 'low', label: '低'}, {value: 'medium', label: '中（官方归为 high）'}, {value: 'high', label: '高（官方 max）'}] : [{value: 'none', label: '关闭'}, {value: 'low', label: '低 · 2048 tokens'}, {value: 'medium', label: '中 · 4096 tokens'}, {value: 'high', label: '高 · 8192 tokens'}]}/></Form.Item>
           <Form.Item label={`API 密钥（${settingsProvider === 'llama' ? '本地模型通常不需要' : hasStoredKey ? '已保存；留空保留' : '未配置'}）`} name="api_key"><Input.Password aria-label="API 密钥" autoComplete="new-password" visibilityToggle={false} placeholder={settingsProvider === 'llama' ? '本地服务无鉴权时留空' : hasStoredKey ? '已保存 Key；留空保留' : '粘贴你自己的 API Key'}/></Form.Item>
@@ -473,9 +486,10 @@ function App() {
         </Form>
       </Modal>
       <Modal title="重命名支线" open={renameOpen} onCancel={() => setRenameOpen(false)} onOk={guard(renameSelectedBranch)} okText="保存" cancelText="取消" okButtonProps={{disabled: submitting || !renameTitle.trim()}}>
-        <Input aria-label="支线名称" value={renameTitle} onChange={event => setRenameTitle(event.target.value)} maxLength={200} onPressEnter={() => renameTitle.trim() && guard(renameSelectedBranch)()}/>
+        <Input aria-label="支线名称" value={renameTitle} onChange={event => setRenameTitle(event.target.value)} onPressEnter={() => renameTitle.trim() && guard(renameSelectedBranch)()}/>
       </Modal>
-      <Modal title="导入 TXT / EPUB" open={importOpen} onCancel={() => !importing && setImportOpen(false)} onOk={guard(importBook)} confirmLoading={importing} okText="导入" cancelText="取消" cancelButtonProps={{disabled: importing}}><Form layout="vertical"><Form.Item label="小说文件（最大 32 MiB）"><Upload accept=".txt,.epub" maxCount={1} beforeUpload={selected => { setFile(selected); return false; }} onRemove={() => setFile(null)} fileList={file ? [{uid: 'selected', name: file.name, status: 'done'}] : []}><Button aria-label="选择小说文件" disabled={importing}>选择文件</Button></Upload></Form.Item><Form.Item label="书名（可选）"><Input aria-label="导入书名" value={importTitle} onChange={e => setImportTitle(e.target.value)} maxLength={200}/></Form.Item></Form></Modal>
+      <Modal title="导入 TXT / EPUB" open={importOpen} onCancel={() => !importing && setImportOpen(false)} onOk={guard(importBook)} confirmLoading={importing} okText="导入" cancelText="取消" cancelButtonProps={{disabled: importing}}><Form layout="vertical"><Form.Item label="小说文件（最大 32 MiB）"><Upload accept=".txt,.epub" maxCount={1} beforeUpload={selected => { setFile(selected); return false; }} onRemove={() => setFile(null)} fileList={file ? [{uid: 'selected', name: file.name, status: 'done'}] : []}><Button aria-label="选择小说文件" disabled={importing}>选择文件</Button></Upload></Form.Item><Form.Item label="书名（可选）"><Input aria-label="导入书名" value={importTitle} onChange={e => setImportTitle(e.target.value)}/></Form.Item></Form></Modal>
+      <Modal title="导入数据" open={pendingImport !== null} onCancel={() => setPendingImport(null)} onOk={guard(replaceData)} okText="替换全部数据" cancelText="取消" okButtonProps={{danger: true}}><p>导入会删除当前浏览器中的全部小说、章节、支线和记忆，并用所选文件替换。此操作无法撤销。</p></Modal>
     </div>
   </ConfigProvider>;
 }

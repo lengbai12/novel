@@ -299,6 +299,7 @@
     <a href="#generate">生成首章</a>
     <a href="#read">阅读与续写</a>
     <a href="#manage">管理支线</a>
+    <a href="#data">数据与备份</a>
     <a href="#faq">常见问题</a>
   </nav>
 
@@ -328,8 +329,9 @@
         <li>点“保存并测试”，状态变为“我的模型就绪”后才能生成。</li>
       </ol>
       <p>模型未就绪、并发已满或已有任务运行时，“创建支线并写首章”会暂时不可用。</p>
-      <div class="callout warn"><strong>提示：</strong>API Key 只保存在你自己的浏览器，提交任务时发送到服务端内存，不写入数据库；公用电脑请用完清除。</div>
-      <div class="callout"><strong>本地模型：</strong>llama.cpp 等本地接口只允许在本机通过 <code>http://127.0.0.1:8080</code> 直接访问时使用；通过公网域名访问时，服务器会拒绝 localhost 和内网地址。</div>
+      <div class="callout warn"><strong>提示：</strong>API Key 只保存在本浏览器的 localStorage 中，只发送给你设置的模型接口；不会导出，也不会写入小说数据。公用电脑请用完清除。</div>
+      <div class="callout"><strong>跨域要求：</strong>页面由浏览器直接请求你设置的模型接口，因此该接口必须允许来自本站的跨域请求（CORS）。接口不支持时，“保存并测试”会失败。</div>
+      <div class="callout"><strong>地址要求：</strong>其他接口请填写 <code>https://</code> 地址；浏览器会阻止从 https 页面请求 http 地址。本地 llama.cpp 默认地址为 <code>http://127.0.0.1:8000/v1</code>，需在本机运行，可在“我的模型”中修改。</div>
     </section>
 
     <section id="fork">
@@ -405,8 +407,20 @@
       <div class="callout warn"><strong>删除不可撤销。</strong>删除支线前先确认名称和开篇位置；需要保留时先“导出 TXT”。</div>
     </section>
 
+    <section id="data">
+      <h2>数据与备份</h2>
+      <p>小说、章节、支线和记忆保存在<strong>本浏览器</strong>的 IndexedDB 中（数据库名 <code>novel-if</code>），不上传到任何服务器。</p>
+      <ul>
+        <li><strong>其他电脑或其他浏览器看不到这些数据</strong>。需要在另一台电脑使用时，先在原电脑“导出数据”，再在那台电脑“导入数据”。</li>
+        <li><strong>导出数据</strong>：下载 <code>novel-if-data.json</code>，包含全部小说、章节、支线和记忆；不包含 API Key。</li>
+        <li><strong>导入数据</strong>：确认后会<strong>删除当前浏览器中的全部数据</strong>，再用文件内容替换。此操作无法撤销。</li>
+        <li>清除浏览器的网站数据会删除这些内容；导出的文件是唯一的备份。</li>
+      </ul>
+    </section>
+
     <section id="faq">
       <h2>常见问题</h2>
+      <details><summary>关闭或刷新页面后任务会怎样？</summary><p>任务只在当前页面中运行。关闭或刷新页面会中断任务，正在生成的草稿和进度丢失，未完成的章节不会保存。</p></details>
       <details><summary>为什么创建后等待很久？</summary><p>分叉章节靠后时，程序要先阅读并压缩此前所有章节。已经“理解”过的章节会复用缓存；可以提前点“理解至本章”减少等待。</p></details>
       <details><summary>可以先只理解、不生成吗？</summary><p>可以。读原文时点“理解至本章”，只建立剧情记忆，不写小说。之后创建支线会更快。</p></details>
       <details><summary>首章不满意怎么办？</summary><p>点“重新生成末章（保留原版）”，或先“删除末章”再“续写一章”。程序不会自动评分。</p></details>

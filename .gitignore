@@ -1,6 +1,4 @@
 node_modules/
-__pycache__/
-*.py[cod]
 library/model-settings.json
 library/model-settings.json.*.tmp
 library/*.sqlite3*
@@ -15,6 +13,4 @@ library/*.migrated*
 llama-b11960/
 cudart-llama-b11960-bin-ubuntu-cuda-13.4-x64/
 *.gguf
-/README.md
 /开题报告/
-/THIRD_PARTY_NOTICES.md
