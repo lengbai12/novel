@@ -4,6 +4,7 @@ import {Alert, AutoComplete, Button, Checkbox, Collapse, ConfigProvider, Drawer,
 import 'antd/dist/reset.css';
 import './style.css';
 import * as engine from '../src/engine.js';
+import {resolveApiKey} from '../src/credentials.js';
 import {checkModel} from '../src/model.js';
 import {exportData, importData} from '../src/store.js';
 
@@ -128,8 +129,18 @@ function App() {
     let values;
     try { values = await settingsForm.validateFields(); } catch { return; }
     const isLocal = values.provider === 'llama';
-    const key = (values.api_key || '').trim() || (isLocal ? '' : (visitorModel.api_key || ''));
-    if (!key && !isLocal) { setSettingsError('请填写你自己的 API Key。'); return; }
+    const key = isLocal ? '' : resolveApiKey({
+      storedKey: visitorModel.api_key,
+      typedKey: values.api_key,
+      storedUrl: visitorModel.api_url,
+      nextUrl: values.api_url,
+    });
+    if (!key && !isLocal) {
+      setSettingsError(visitorModel.api_key
+        ? 'API 地址已更改，出于安全考虑不会沿用旧 Key；请重新填写新地址的 Key。'
+        : '请填写你自己的 API Key。');
+      return;
+    }
     const config = {provider: values.provider, api_url: values.api_url.trim(), model: values.model.trim(), reasoning_effort: values.reasoning_effort, api_key: key};
     setSettingsSaving(true); setSettingsError(''); setVisitorChecking(true);
     try {
@@ -471,7 +482,7 @@ function App() {
       <Modal title="我的模型" open={settingsOpen} onCancel={closeSettings} onOk={saveSettings} confirmLoading={settingsSaving} okText="保存并测试" cancelText="取消" cancelButtonProps={{disabled: settingsSaving}} okButtonProps={{disabled: settingsSaving || settingsLoading}}>
         {settingsError && <Alert type="error" message={settingsError} showIcon/>}
         <Alert className="settings-hint" type="info" showIcon message="模型由你提供：API Key 只保存在本浏览器的 localStorage 中，只发送给你设置的模型接口。请勿在公用电脑保存。"/>
-        <Form form={settingsForm} layout="vertical" disabled={settingsLoading || settingsSaving} autoComplete="off" onValuesChange={changed => { setSettingsError(''); const preset = VISITOR_PROVIDERS[changed.provider]; if (preset?.api_url) settingsForm.setFieldsValue({api_url: preset.api_url, model: preset.model}); }}>
+        <Form form={settingsForm} layout="vertical" disabled={settingsLoading || settingsSaving} autoComplete="off" onValuesChange={changed => { setSettingsError(''); if (Object.hasOwn(changed, 'provider')) settingsForm.setFieldValue('api_key', ''); const preset = VISITOR_PROVIDERS[changed.provider]; if (preset?.api_url) settingsForm.setFieldsValue({api_url: preset.api_url, model: preset.model}); }}>
           <Form.Item label="接口类型" name="provider" rules={[{required: true}]}><Select aria-label="接口类型" options={Object.entries(VISITOR_PROVIDERS).map(([value, preset]) => ({value, label: preset.label}))}/></Form.Item>
           {settingsProvider === 'deepseek' && <Alert className="settings-hint" type="info" showIcon message="DeepSeek：模型 deepseek-flash / deepseek-v4-pro；使用你自己的 DeepSeek API Key。"/>
             || settingsProvider === 'llama' && <Alert className="settings-hint" type="warning" showIcon message="本地 llama.cpp 需在本机运行，并允许浏览器跨域访问（CORS）；通常不需要 API Key。"/>
@@ -480,7 +491,7 @@ function App() {
           <Form.Item label="API URL（OpenAI 兼容基础地址）" name="api_url" rules={[{required: true, whitespace: true, message: '填写 API URL'}]}><Input aria-label="API URL" placeholder="https://api.deepseek.com"/></Form.Item>
           <Form.Item label="模型 ID" name="model" rules={[{required: true, whitespace: true, message: '填写模型 ID'}]}><AutoComplete aria-label="模型 ID" placeholder={settingsProvider === 'deepseek' ? 'deepseek-flash 或 deepseek-v4-pro' : '填写模型 ID'} options={(MODEL_SUGGESTIONS[settingsProvider] || []).map(value => ({value}))}/></Form.Item>
           <Form.Item label={settingsProvider === 'deepseek' ? '思考强度（映射到官方 none/low/high/max）' : '思考强度'} name="reasoning_effort" rules={[{required: true}]}><Select aria-label="思考强度" options={settingsProvider === 'deepseek' ? [{value: 'none', label: '关闭'}, {value: 'low', label: '低'}, {value: 'medium', label: '中（官方归为 high）'}, {value: 'high', label: '高（官方 max）'}] : [{value: 'none', label: '关闭'}, {value: 'low', label: '低 · 2048 tokens'}, {value: 'medium', label: '中 · 4096 tokens'}, {value: 'high', label: '高 · 8192 tokens'}]}/></Form.Item>
-          <Form.Item label={`API 密钥（${settingsProvider === 'llama' ? '本地模型通常不需要' : hasStoredKey ? '已保存；留空保留' : '未配置'}）`} name="api_key"><Input.Password aria-label="API 密钥" autoComplete="new-password" visibilityToggle={false} placeholder={settingsProvider === 'llama' ? '本地服务无鉴权时留空' : hasStoredKey ? '已保存 Key；留空保留' : '粘贴你自己的 API Key'}/></Form.Item>
+          <Form.Item label={`API 密钥（${settingsProvider === 'llama' ? '本地模型通常不需要' : hasStoredKey ? '已保存；仅同一 API 地址可留空沿用' : '未配置'}）`} name="api_key"><Input.Password aria-label="API 密钥" autoComplete="new-password" visibilityToggle={false} placeholder={settingsProvider === 'llama' ? '本地服务无鉴权时留空' : hasStoredKey ? '已保存 Key；仅同一 API 地址留空沿用' : '粘贴你自己的 API Key'}/></Form.Item>
           <Space wrap><Button danger type="text" size="small" disabled={settingsSaving || !hasStoredKey} onClick={clearVisitorKey}>清除已保存 Key</Button>{visitorChecking ? <Tag>检测中…</Tag> : visitorReady ? <Tag color="success">已连接</Tag> : null}</Space>
           {visitorError && <Alert className="settings-hint" type="warning" showIcon message={visitorError}/>}
         </Form>

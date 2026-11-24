@@ -1,9 +1,11 @@
 {
   "name": "local-novel-workbench",
   "private": true,
+  "type": "module",
   "version": "1.0.0",
   "scripts": {
-    "build": "esbuild frontend/main.jsx --bundle --minify --legal-comments=inline --target=es2020 --outfile=static/app.js"
+    "build": "esbuild frontend/main.jsx --bundle --minify --legal-comments=inline --target=es2020 --outfile=static/app.js",
+    "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {
     "antd": "5.27.6",

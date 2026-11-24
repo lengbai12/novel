@@ -329,7 +329,7 @@
         <li>点“保存并测试”，状态变为“我的模型就绪”后才能生成。</li>
       </ol>
       <p>模型未就绪、并发已满或已有任务运行时，“创建支线并写首章”会暂时不可用。</p>
-      <div class="callout warn"><strong>提示：</strong>API Key 只保存在本浏览器的 localStorage 中，只发送给你设置的模型接口；不会导出，也不会写入小说数据。公用电脑请用完清除。</div>
+      <div class="callout warn"><strong>提示：</strong>API Key 只保存在本浏览器的 localStorage 中，只发送给你设置的模型接口；更换 API 地址后需重新填写该地址的 Key，不会自动沿用旧 Key；不会导出，也不会写入小说数据。公用电脑请用完清除。</div>
       <div class="callout"><strong>跨域要求：</strong>页面由浏览器直接请求你设置的模型接口，因此该接口必须允许来自本站的跨域请求（CORS）。接口不支持时，“保存并测试”会失败。</div>
       <div class="callout"><strong>地址要求：</strong>其他接口请填写 <code>https://</code> 地址；浏览器会阻止从 https 页面请求 http 地址。本地 llama.cpp 默认地址为 <code>http://127.0.0.1:8000/v1</code>，需在本机运行，可在“我的模型”中修改。</div>
     </section>
