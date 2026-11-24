@@ -444,8 +444,8 @@ function App() {
   const ifPane = <section className="if-content" aria-label="IF 工作区"><Tabs activeKey={tab} onChange={value => { setTab(value); store.set('tab', value); }} items={[
     {key: 'create', label: '创建 IF', children: <Form form={form} layout="vertical" initialValues={{chapter_words: 1200, fork_chapter: 1}} onFinish={guard(values => beginJob(model => engine.startBranch(book.id, {...values, title: values.title.trim(), premise: values.premise.trim(), style: values.style?.trim() || '', model})))}>
       <Form.Item label="支线名称" name="title" rules={[{required: true, whitespace: true, message: '填写支线名称'}]}><Input aria-label="支线名称"/></Form.Item>
-      <Form.Item label="分叉章节（仅沿用分歧前事实）" name="fork_chapter" rules={[{required: true}]}><Select aria-label="分叉章节" options={[{value: 0, label: '故事开始前（不采用原作剧情）'}, ...(book?.chapters || []).map(c => ({value: c.number, label: c.title + ' 之后'}))]}/></Form.Item>
-      <div className="fork-hint">{createFork ? <>分歧点：<strong>{createForkTitle || `阅读段 ${createFork}`} 之后</strong>。该章结束前的事实保留，之后原作全部作废。</> : '分歧点：故事开始前。原作剧情不采用。'}</div>
+      <Form.Item label="分叉章节（仅沿用分歧前事实）" name="fork_chapter" rules={[{required: true}]}><Select aria-label="分叉章节" options={(book?.chapters || []).map(c => ({value: c.number, label: c.title + ' 之后'}))}/></Form.Item>
+      <div className="fork-hint">{createFork ? <>分歧点：<strong>{createForkTitle || `阅读段 ${createFork}`} 之后</strong>。该章结束前的事实保留，之后原作全部作废。</> : '请选择第 1 章或之后的章节作为分叉点。'}</div>
       <Form.Item label="IF 设定 / 转折点" name="premise" rules={[{required: true, whitespace: true, message: '填写 IF 设定'}]}><Input.TextArea aria-label="IF 设定" rows={6}/></Form.Item>
       <Form.Item label="写作风格（可选）" name="style"><Input.TextArea aria-label="写作风格" rows={3}/></Form.Item>
       <Form.Item label="每章字数" name="chapter_words" rules={[{required: true}]}><InputNumber aria-label="每章字数" step={100}/></Form.Item>

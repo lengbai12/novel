@@ -6,6 +6,7 @@ import {
 } from './model.js';
 import {req, transact} from './store.js';
 import {parseBook} from './text.js';
+import {validateBranchInput} from './validation.js';
 
 const MAX_CONCURRENCY = 1;
 const WORKING_TOKENS = 100000;
@@ -187,6 +188,9 @@ async function generate(job, config, system, prompt, {maxTokens = 1600, temperat
 }
 
 async function writeChapter(ctx, branch, evidence, revision) {
+  if (branch.fork_chapter === 0) {
+    throw new Conflict('当前版本不支持“故事开始前”分叉；请从第 1 章或之后创建支线。');
+  }
   const previous = branch.chapters;
   const number = previous.length + 1;
   ctx.update({draft_chapter: number});
@@ -591,7 +595,7 @@ export async function startRead(bookId, {through, model}) {
 
 export async function startBranch(bookId, {title, fork_chapter, premise, style, chapter_words, model}) {
   const config = normalizeConfig(model);
-  await chapterCount(bookId);
+  const count = await chapterCount(bookId);
   const values = {
     title: trimText(title, '我的IF线') || '我的IF线',
     fork_chapter: integer(fork_chapter),
@@ -599,6 +603,7 @@ export async function startBranch(bookId, {title, fork_chapter, premise, style, 
     style: trimText(style, '延续原作语言、人物和叙事视角。'),
     chapter_words: integer(chapter_words ?? 1200),
   };
+  validateBranchInput({forkChapter: values.fork_chapter, chapterCount: count, chapterWords: values.chapter_words});
   if (!values.premise) throw new Error('请写明想改变什么，以及希望达成的结局。');
   return submit({config, bookId, work: ctx => branchJob(ctx, bookId, values)});
 }
