@@ -7,6 +7,7 @@ import {
 import {req, transact} from './store.js';
 import {parseBook} from './text.js';
 import {validateBranchInput} from './validation.js';
+import {jobOwnsBranch} from './jobs.js';
 
 const MAX_CONCURRENCY = 1;
 const WORKING_TOKENS = 100000;
@@ -124,7 +125,7 @@ async function chapterCount(bookId) {
 
 function checkNotGenerating(branchId, message) {
   for (const job of ACTIVE) {
-    if (job.branch_id === branchId) throw new Conflict(message);
+    if (jobOwnsBranch(job, branchId)) throw new Conflict(message);
   }
 }
 
