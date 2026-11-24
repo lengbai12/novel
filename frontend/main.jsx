@@ -74,7 +74,7 @@ function App() {
   const [readerMode, setReaderMode] = useState('original');
   const [mobilePane, setMobilePane] = useState('reader');
   const [tocOpen, setTocOpen] = useState(false);
-  const [jobId, setJobId] = useState(store.get('job'));
+  const [jobId, setJobId] = useState(() => engine.recoverJobId());
   const [job, setJob] = useState(null);
   const [outputOpen, setOutputOpen] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -96,7 +96,7 @@ function App() {
   const [visitorChecking, setVisitorChecking] = useState(false);
   const [visitorError, setVisitorError] = useState('');
   const [hasStoredKey, setHasStoredKey] = useState(() => !!loadVisitorModel().api_key);
-  const current = useRef({book: null, number: 1, branch: null, bookRequest: 0, chapterRequest: 0, branchRequest: 0, jobId: store.get('job'), submitting: false});
+  const current = useRef({book: null, number: 1, branch: null, bookRequest: 0, chapterRequest: 0, branchRequest: 0, jobId, submitting: false});
   const outputRef = useRef(null);
   const drawerOutputRef = useRef(null);
   const guard = fn => (...args) => Promise.resolve().then(() => fn(...args)).catch(e => setError(e.message || String(e)));
@@ -104,7 +104,7 @@ function App() {
   const locked = !visitorReady || atCapacity || submitting || !!jobId || loading;
   const visitorLabel = visitorChecking ? '检测中…' : (!visitorModel.api_key && visitorModel.provider !== 'llama') ? '未配置模型' : visitorReady ? '我的模型就绪' : '模型未就绪';
   const visitorClass = visitorReady ? 'ready' : visitorChecking ? 'pending' : 'warn';
-  const revisionAvailable = ['error', 'cancelled'].includes(job?.status) && typeof job?.draft === 'string' && !!job.draft.trim();
+  const revisionAvailable = !job?.published && ['error', 'cancelled'].includes(job?.status) && typeof job?.draft === 'string' && !!job.draft.trim();
   const revisionMetadataReady = !!job?.id && !!(job?.branch_id || job?.result?.branch_id) && Number.isInteger(job?.draft_chapter) && job.draft_chapter >= 1 && job.draft_chapter <= 100000;
   const outputText = job?.preview || job?.draft || '';
   const draftText = typeof job?.draft === 'string' ? job.draft : '';
@@ -272,6 +272,8 @@ function App() {
   }
   async function replaceData() {
     await importData(pendingImport);
+    engine.dismissJob(job?.id);
+    setJob(null);
     setPendingImport(null);
     await reloadLibrary();
   }
@@ -297,7 +299,7 @@ function App() {
     current.current.submitting = true; setSubmitting(true); setError('');
     try {
       const data = await launch(visitorModel);
-      current.current.jobId = String(data.job_id); store.set('job', data.job_id);
+      current.current.jobId = String(data.job_id);
       setJob(null); setJobId(String(data.job_id));
     } finally { current.current.submitting = false; setSubmitting(false); }
   }
@@ -387,6 +389,10 @@ function App() {
     try { await navigator.clipboard.writeText(text); setCopyState('已复制'); }
     catch { setError('复制失败，请手动选中文本复制'); }
   }
+  function closeJob() {
+    engine.dismissJob(job?.id);
+    setJob(null);
+  }
   useEffect(() => {
     let alive = true;
     void refreshStatus();
@@ -408,14 +414,14 @@ function App() {
         if (!alive) return;
         setJob(data);
         if (['done', 'error', 'cancelled'].includes(data.status)) {
-          current.current.jobId = null; store.set('job', null); setJobId(null);
+          current.current.jobId = null; setJobId(null);
           if (data.status === 'error') setError(describe(data.error) || '任务失败');
           await refreshStatus(); await refreshAfterJob(data); return;
         }
       } catch (e) {
         if (!alive) return;
         if (/任务不存在/.test(e.message)) {
-          current.current.jobId = null; store.set('job', null); setJobId(null); setError('无法恢复任务：' + e.message); return;
+          current.current.jobId = null; setJobId(null); setError('无法恢复任务：' + e.message); return;
         }
         setJob(previous => ({...previous, stage: e.message + '；自动重试中'}));
       }
@@ -457,7 +463,9 @@ function App() {
     <div className="workbench">
       <header className="toolbar"><div className="brand-block"><span className="brand">小说工作台</span></div><Select aria-label="选择小说" className="book-select" placeholder="选择小说" value={book?.id} loading={loading} options={books.map(b => ({value: b.id, label: b.title}))} onChange={guard(id => openBook(id))}/><Button onClick={() => setImportOpen(true)}>导入</Button><Button onClick={openSettings}>我的模型</Button><Button onClick={guard(exportAll)}>导出数据</Button><Upload accept=".json,application/json" showUploadList={false} disabled={!!jobId || submitting} beforeUpload={selected => { guard(async () => setPendingImport(await selected.text()))(); return false; }}><Button disabled={!!jobId || submitting}>导入数据</Button></Upload><Button className="help-button" href="help.html" target="_blank" rel="noopener noreferrer" aria-label="打开使用帮助">帮助</Button><Tag bordered={false} className={`model-status ${visitorClass}`} color={visitorReady ? 'success' : 'warning'} title={`${VISITOR_PROVIDERS[visitorModel.provider]?.label || visitorModel.provider} · ${visitorModel.model} · 思考：${visitorModel.reasoning_effort} · 任务 ${status.active_jobs ?? 0}/${status.max_concurrency ?? 1}`}>{visitorLabel} · {status.active_jobs ?? 0}/{status.max_concurrency ?? 1}</Tag></header>
       {error && <Alert type="error" message={error} closable onClose={() => setError('')} showIcon/>}
-      {(job || jobId) && <section className="job-panel" aria-label="后台任务"><div className="job-row"><span role="status" className={`job-status ${job?.status || 'queued'}`}>{({done: '任务完成', error: '任务失败', cancelled: '已取消', running: '运行中', queued: '排队中'})[job?.status] || '提交成功'} · {job?.stage || ''}</span><Space size={6} wrap><span className="job-meta">{outputText.length} 字{job?.reasoning_chars ? ` · 思考 ${job.reasoning_chars} 字` : ''}</span>{jobId ? <Button danger onClick={guard(async () => { await engine.cancelJob(jobId); setJob(j => ({...j, stage: '已请求取消'})); })}>取消任务</Button> : <Button type="text" onClick={() => setJob(null)}>关闭</Button>}</Space></div><Progress aria-label="任务进度" percent={job?.total ? Math.min(100, Math.round(100 * (job.progress || 0) / job.total)) : 0} status={job?.status === 'error' ? 'exception' : job?.status === 'done' ? 'success' : 'active'} size="small" format={() => job?.total ? `${job.progress || 0}/${job.total}` : ''}/>
+      {(job || jobId) && <section className="job-panel" aria-label="后台任务"><div className="job-row"><span role="status" className={`job-status ${job?.status || 'queued'}`}>{({done: '任务完成', error: '任务失败', cancelled: '已取消', running: '运行中', queued: '排队中'})[job?.status] || '提交成功'} · {job?.stage || ''}</span><Space size={6} wrap><span className="job-meta">{outputText.length} 字{job?.reasoning_chars ? ` · 思考 ${job.reasoning_chars} 字` : ''}</span>{jobId ? <Button danger onClick={guard(async () => { await engine.cancelJob(jobId); setJob(j => ({...j, stage: '已请求取消'})); })}>取消任务</Button> : <Button type="text" onClick={guard(closeJob)}>关闭</Button>}</Space></div><Progress aria-label="任务进度" percent={job?.total ? Math.min(100, Math.round(100 * (job.progress || 0) / job.total)) : 0} status={job?.status === 'error' ? 'exception' : job?.status === 'done' ? 'success' : 'active'} size="small" format={() => job?.total ? `${job.progress || 0}/${job.total}` : ''}/>
+        {job?.recovery_error && <Alert type="warning" showIcon message={job.recovery_error}/>}
+        {job?.recovered && <Alert type="info" showIcon message="已恢复本标签页最近任务。未完成任务不会自动继续；关闭面板将清除恢复记录。"/>}
         <div className="job-output-wrap"><div className="job-output-bar"><span>模型输出{job?.status === 'running' ? ' · 实时' : ''}</span><Space size={10} wrap><Checkbox checked={autoScroll} onChange={event => setAutoScroll(event.target.checked)}>自动滚动</Checkbox><Button type="link" size="small" disabled={!outputText} onClick={() => copyOutput(outputText)}>{copyState || '复制'}</Button><Button type="link" size="small" disabled={!outputText} onClick={() => setOutputOpen(true)}>放大查看</Button></Space></div><pre className="job-output" ref={outputRef}>{outputText || '等待模型输出…'}</pre></div>
         {showDraft && <div className="job-output-wrap"><div className="job-output-bar"><span>{job?.published ? '本次正文（已保存）' : '最后完整草稿（未保存）'}</span><Space size={10}><Button type="link" size="small" onClick={() => copyOutput(draftText)}>{copyState || '复制'}</Button><Button type="link" size="small" onClick={() => setOutputOpen(true)}>放大查看</Button></Space></div><pre className="job-output job-draft">{draftText}</pre></div>}
         {revisionAvailable && <div className="draft-revision">

@@ -8,6 +8,7 @@ import {req, transact} from './store.js';
 import {parseBook} from './text.js';
 import {validateBranchInput} from './validation.js';
 import {jobOwnsBranch} from './jobs.js';
+import {saveJob, loadJob, clearJob} from './job-recovery.js';
 
 const MAX_CONCURRENCY = 1;
 const WORKING_TOKENS = 100000;
@@ -37,6 +38,9 @@ function check(job) {
 
 function update(job, patch) {
   Object.assign(job, patch);
+  if (['status', 'draft', 'draft_chapter', 'result', 'published'].some(key => Object.hasOwn(patch, key))) {
+    job.recovery_error = saveJob(job);
+  }
 }
 
 function makeContext(job, config) {
@@ -623,8 +627,8 @@ export async function startRevise(jobId, {feedback, model}) {
   const config = normalizeConfig(model);
   const text = trimText(feedback);
   if (!text) throw new Error('请提供非空的编辑反馈。');
-  const previous = JOBS.get(jobId);
-  if (!previous) throw new Error('任务不存在');
+  const previous = getJob(jobId);
+  if (previous.published) throw new Conflict('该任务的正文已经保存，不能再次作为未保存草稿修订。');
   if (!['error', 'cancelled'].includes(previous.status)) {
     throw new Conflict('只能修订已失败或已取消的任务；请等待运行中的任务结束。');
   }
@@ -638,10 +642,27 @@ export async function startRevise(jobId, {feedback, model}) {
 }
 
 export function getJob(jobId) {
-  const job = JOBS.get(jobId);
+  let job = JOBS.get(jobId);
+  if (!job) {
+    const recovered = loadJob();
+    if (recovered?.id === jobId) {
+      job = {...recovered, controller: new AbortController()};
+      JOBS.set(jobId, job);
+    }
+  }
   if (!job) throw new Error('任务不存在');
   const {controller, ...snapshot} = job;
   return snapshot;
+}
+
+export function recoverJobId() {
+  return loadJob()?.id || null;
+}
+
+export function dismissJob(jobId) {
+  if ([...ACTIVE].some(job => job.id === jobId)) throw new Conflict('运行中的任务不能关闭。');
+  clearJob();
+  JOBS.delete(jobId);
 }
 
 export function cancelJob(jobId) {
