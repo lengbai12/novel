@@ -6,6 +6,9 @@ import {
 } from './model.js';
 import {req, transact} from './store.js';
 import {parseBook} from './text.js';
+import {validateBranchInput} from './validation.js';
+import {jobOwnsBranch} from './jobs.js';
+import {saveJob, loadJob, clearJob} from './job-recovery.js';
 
 const MAX_CONCURRENCY = 1;
 const WORKING_TOKENS = 100000;
@@ -35,6 +38,9 @@ function check(job) {
 
 function update(job, patch) {
   Object.assign(job, patch);
+  if (['status', 'draft', 'draft_chapter', 'result', 'published'].some(key => Object.hasOwn(patch, key))) {
+    job.recovery_error = saveJob(job);
+  }
 }
 
 function makeContext(job, config) {
@@ -123,7 +129,7 @@ async function chapterCount(bookId) {
 
 function checkNotGenerating(branchId, message) {
   for (const job of ACTIVE) {
-    if (job.branch_id === branchId) throw new Conflict(message);
+    if (jobOwnsBranch(job, branchId)) throw new Conflict(message);
   }
 }
 
@@ -187,6 +193,9 @@ async function generate(job, config, system, prompt, {maxTokens = 1600, temperat
 }
 
 async function writeChapter(ctx, branch, evidence, revision) {
+  if (branch.fork_chapter === 0) {
+    throw new Conflict('当前版本不支持“故事开始前”分叉；请从第 1 章或之后创建支线。');
+  }
   const previous = branch.chapters;
   const number = previous.length + 1;
   ctx.update({draft_chapter: number});
@@ -591,7 +600,7 @@ export async function startRead(bookId, {through, model}) {
 
 export async function startBranch(bookId, {title, fork_chapter, premise, style, chapter_words, model}) {
   const config = normalizeConfig(model);
-  await chapterCount(bookId);
+  const count = await chapterCount(bookId);
   const values = {
     title: trimText(title, '我的IF线') || '我的IF线',
     fork_chapter: integer(fork_chapter),
@@ -599,6 +608,7 @@ export async function startBranch(bookId, {title, fork_chapter, premise, style, 
     style: trimText(style, '延续原作语言、人物和叙事视角。'),
     chapter_words: integer(chapter_words ?? 1200),
   };
+  validateBranchInput({forkChapter: values.fork_chapter, chapterCount: count, chapterWords: values.chapter_words});
   if (!values.premise) throw new Error('请写明想改变什么，以及希望达成的结局。');
   return submit({config, bookId, work: ctx => branchJob(ctx, bookId, values)});
 }
@@ -617,8 +627,8 @@ export async function startRevise(jobId, {feedback, model}) {
   const config = normalizeConfig(model);
   const text = trimText(feedback);
   if (!text) throw new Error('请提供非空的编辑反馈。');
-  const previous = JOBS.get(jobId);
-  if (!previous) throw new Error('任务不存在');
+  const previous = getJob(jobId);
+  if (previous.published) throw new Conflict('该任务的正文已经保存，不能再次作为未保存草稿修订。');
   if (!['error', 'cancelled'].includes(previous.status)) {
     throw new Conflict('只能修订已失败或已取消的任务；请等待运行中的任务结束。');
   }
@@ -632,10 +642,27 @@ export async function startRevise(jobId, {feedback, model}) {
 }
 
 export function getJob(jobId) {
-  const job = JOBS.get(jobId);
+  let job = JOBS.get(jobId);
+  if (!job) {
+    const recovered = loadJob();
+    if (recovered?.id === jobId) {
+      job = {...recovered, controller: new AbortController()};
+      JOBS.set(jobId, job);
+    }
+  }
   if (!job) throw new Error('任务不存在');
   const {controller, ...snapshot} = job;
   return snapshot;
+}
+
+export function recoverJobId() {
+  return loadJob()?.id || null;
+}
+
+export function dismissJob(jobId) {
+  if ([...ACTIVE].some(job => job.id === jobId)) throw new Conflict('运行中的任务不能关闭。');
+  clearJob();
+  JOBS.delete(jobId);
 }
 
 export function cancelJob(jobId) {
